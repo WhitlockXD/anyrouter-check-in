@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Jungle Commando - 魂斗罗风格网页版</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07110f;--panel:#0d1b18;--text:#eaffd0;--accent:#ffe066;--danger:#ff5d5d}
+    *{box-sizing:border-box}html,body{height:100%;margin:0;background:radial-gradient(circle at top,#18372e 0,#07110f 55%,#020605 100%);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text);overflow:hidden}
+    body{display:grid;place-items:center;padding:12px}.wrap{width:min(100%,1100px);position:relative}.frame{position:relative;border:4px solid #6f8d76;box-shadow:0 0 0 4px #16231e,0 14px 50px #000a;background:#000;overflow:hidden;border-radius:8px;aspect-ratio:16/9}
+    canvas{width:100%;height:100%;display:block;image-rendering:pixelated;background:#101b19}.hud{position:absolute;inset:10px 12px auto;display:flex;justify-content:space-between;gap:10px;pointer-events:none;text-shadow:2px 2px #000;font-weight:800;font-size:clamp(12px,1.8vw,20px)}
+    .tip{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:#0009;border:1px solid #9fb5a5;padding:7px 10px;border-radius:6px;font-size:clamp(10px,1.3vw,14px);white-space:nowrap}.overlay{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(#0017,#000a);padding:28px;text-align:center}.overlay.hidden{display:none}.card{max-width:620px;background:#06100ddd;border:2px solid #b0c3ad;padding:24px;border-radius:10px;box-shadow:0 10px 40px #000}.logo{font-size:clamp(34px,7vw,74px);line-height:.9;letter-spacing:.03em;margin:0;color:#ffdf5d;text-shadow:4px 4px #6b2f1a,8px 8px #111}.sub{margin:14px 0 6px;color:#bde8c1}.start{display:inline-block;margin-top:14px;padding:10px 16px;border:2px solid #ffe066;color:#ffe066;background:#1b220e;font:inherit;font-weight:800;cursor:pointer;border-radius:6px}.small{font-size:12px;opacity:.8;line-height:1.6}.touch{display:none;position:absolute;inset:auto 8px 8px;justify-content:space-between;pointer-events:none}.pad,.actions{display:flex;gap:8px;align-items:end}.touch button{pointer-events:auto;width:54px;height:54px;border-radius:50%;border:2px solid #dff6d3aa;background:#092019bb;color:#fff;font:800 20px monospace;touch-action:none}.touch .wide{width:68px;border-radius:18px;font-size:14px}@media (hover:none),(max-width:760px){.touch{display:flex}.tip{display:none}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="frame">
+      <canvas id="game" width="960" height="540" aria-label="Jungle Commando game canvas"></canvas>
+      <div class="hud"><span id="score">SCORE 000000</span><span id="life">LIFE ♥♥♥</span><span id="stage">STAGE 1</span></div>
+      <div class="tip">A/D 移动 · W/空格 跳跃 · S 蹲下 · J 射击 · K 手雷 · Enter 开始/重开</div>
+      <div class="touch" aria-label="触屏控制">
+        <div class="pad"><button data-key="a">◀</button><button data-key="d">▶</button><button data-key="w">▲</button></div>
+        <div class="actions"><button class="wide" data-key="j">射击</button><button class="wide" data-key="k">手雷</button></div>
+      </div>
+      <section class="overlay" id="overlay">
+        <div class="card">
+          <h1 class="logo">JUNGLE<br>COMMANDO</h1>
+          <p class="sub">原创像素风 · 魂斗罗式横版跑射</p>
+          <p>突破丛林防线，摧毁前线指挥核心。</p>
+          <button class="start" id="startBtn">按 ENTER / 点击开始</button>
+          <p class="small">本项目不包含原版《魂斗罗》的角色、音乐、地图或美术资源，仅借鉴经典 run-and-gun 的玩法结构。</p>
+        </div>
+      </section>
+    </div>
+  </main>
+<script>
+(() => {
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const ui={score:document.getElementById('score'),life:document.getElementById('life'),stage:document.getElementById('stage'),overlay:document.getElementById('overlay'),startBtn:document.getElementById('startBtn')};
+const W=960,H=540,GRAV=2100,WORLD=6500,FLOOR=454;
+const keys=new Set(); let game, last=0, audio=null;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const rectHit=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+function beep(freq=220,dur=.05,type='square',gain=.025){try{audio??=new (window.AudioContext||window.webkitAudioContext)();const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(gain,audio.currentTime);g.gain.exponentialRampToValueAtTime(.0001,audio.currentTime+dur);o.connect(g).connect(audio.destination);o.start();o.stop(audio.currentTime+dur);}catch{}}
+function reset(){game={running:true,won:false,over:false,time:0,camera:0,score:0,grenades:3,shake:0,flash:0,spawnTimer:0,player:{x:120,y:FLOOR-52,w:30,h:52,vx:0,vy:0,dir:1,onGround:true,crouch:false,hp:3,inv:0,shootCd:0,grenadeCd:0},bullets:[],enemyBullets:[],grenadeObjs:[],enemies:[],particles:[],pickups:[],boss:null};
+  const fixed=[720,1080,1480,1900,2320,2780,3280,3720,4200,4680,5150,5520];fixed.forEach((x,i)=>spawnEnemy(x,FLOOR-44,i%3===0?'turret':'soldier'));
+  game.pickups.push({x:1660,y:345,w:28,h:28,type:'spread',bob:0});game.pickups.push({x:3950,y:320,w:28,h:28,type:'heal',bob:1});
+  ui.overlay.classList.add('hidden'); updateHud();}
+function spawnEnemy(x,y,type='soldier'){const e={x,y,w:type==='turret'?38:28,h:type==='turret'?38:44,vx:type==='soldier'?-50:0,vy:0,type,hp:type==='turret'?3:2,shoot:rnd(.4,1.6),dead:false,dir:-1};game?.enemies.push(e);}
+function updateHud(){ui.score.textContent='SCORE '+String(game?.score||0).padStart(6,'0');ui.life.textContent='LIFE '+('♥'.repeat(game?.player.hp||0)||'—')+'  💣'+(game?.grenades||0);ui.stage.textContent=game?.boss?'BOSS':'STAGE 1';}
+function shoot(){const p=game.player;if(p.shootCd>0)return;p.shootCd=.14;beep(520,.035);const sy=p.y+(p.crouch?32:18),sx=p.x+p.w/2+p.dir*18;const spread=p.weapon==='spread'?[-.16,0,.16]:[0];spread.forEach(a=>game.bullets.push({x:sx,y:sy,w:10,h:4,vx:p.dir*760*Math.cos(a),vy:760*Math.sin(a),life:1.25}));}
+function throwGrenade(){const p=game.player;if(p.grenadeCd>0||game.grenades<=0)return;p.grenadeCd=.5;game.grenades--;game.grenadeObjs.push({x:p.x+p.w/2,y:p.y+8,w:12,h:12,vx:p.dir*360,vy:-520,t:1.05});beep(180,.08,'sawtooth');updateHud();}
+function explode(x,y,r=115){game.shake=10;beep(75,.18,'sawtooth',.05);for(let i=0;i<32;i++)game.particles.push({x,y,vx:rnd(-260,260),vy:rnd(-300,120),life:rnd(.25,.75),c:Math.random()>.45?'#ffdf5d':'#ff6b35',s:rnd(3,9)});for(const e of game.enemies){const dx=e.x+e.w/2-x,dy=e.y+e.h/2-y;if(Math.hypot(dx,dy)<r){e.hp-=4;if(e.hp<=0)killEnemy(e);}}if(game.boss){const b=game.boss,dx=b.x+b.w/2-x,dy=b.y+b.h/2-y;if(Math.hypot(dx,dy)<r)bossDamage(6);}}
+function killEnemy(e){if(e.dead)return;e.dead=true;game.score+=150;for(let i=0;i<8;i++)game.particles.push({x:e.x+e.w/2,y:e.y+e.h/2,vx:rnd(-140,140),vy:rnd(-180,20),life:rnd(.2,.55),c:'#e3efc9',s:rnd(2,6)});beep(120,.06);updateHud();}
+function hurtPlayer(){const p=game.player;if(p.inv>0||game.over||game.won)return;p.hp--;p.inv=1.5;p.vy=-420;p.vx=-p.dir*220;game.shake=7;beep(95,.18,'square',.045);updateHud();if(p.hp<=0){game.over=true;game.running=false;setTimeout(()=>showEnd(false),250);}}
+function showEnd(win){ui.overlay.classList.remove('hidden');ui.overlay.querySelector('.logo').innerHTML=win?'MISSION<br>COMPLETE':'GAME<br>OVER';ui.overlay.querySelector('.sub').textContent=win?'指挥核心已摧毁！':'战士倒下了，再来一次。';ui.overlay.querySelector('p:not(.sub):not(.small)').textContent='最终得分：'+game.score;ui.startBtn.textContent='按 ENTER / 点击重新开始';}
+function bossDamage(n){const b=game.boss;if(!b||b.dead)return;b.hp-=n;game.flash=2;if(b.hp<=0){b.dead=true;game.score+=3000;updateHud();explode(b.x+b.w/2,b.y+b.h/2,220);setTimeout(()=>{game.won=true;game.running=false;showEnd(true)},700);}}
+function update(dt){if(!game.running)return;game.time+=dt;const p=game.player;p.inv=Math.max(0,p.inv-dt);p.shootCd=Math.max(0,p.shootCd-dt);p.grenadeCd=Math.max(0,p.grenadeCd-dt);game.shake=Math.max(0,game.shake-35*dt);game.flash=Math.max(0,game.flash-5*dt);
+  const left=keys.has('a')||keys.has('arrowleft'),right=keys.has('d')||keys.has('arrowright');p.crouch=keys.has('s')||keys.has('arrowdown');let target=(right-left)*250;if(target)p.dir=Math.sign(target);p.vx+=(target-p.vx)*Math.min(1,12*dt);if(!target)p.vx*=Math.pow(.001,dt);if((keys.has('w')||keys.has('arrowup')||keys.has(' '))&&p.onGround&&!p.crouch){p.vy=-690;p.onGround=false;beep(260,.04)}if(keys.has('j'))shoot();if(keys.has('k')){if(!game._kLatch)throwGrenade();game._kLatch=true}else game._kLatch=false;
+  p.vy+=GRAV*dt;p.x=clamp(p.x+p.vx*dt,0,WORLD-p.w);p.y+=p.vy*dt;if(p.y+p.h>=FLOOR){p.y=FLOOR-p.h;p.vy=0;p.onGround=true}else p.onGround=false;
+  game.camera=clamp(p.x-250,0,WORLD-W);
+  if(p.x>5750&&!game.boss){game.boss={x:6080,y:FLOOR-150,w:150,h:150,hp:45,maxHp:45,shoot:1,phase:0,dead:false};beep(55,.6,'sawtooth',.04)}
+  game.spawnTimer-=dt;if(game.spawnTimer<=0&&p.x<5200){game.spawnTimer=rnd(2.2,4.0);const x=game.camera+W+rnd(80,300);if(x<WORLD-500)spawnEnemy(x,FLOOR-44,'soldier');}
+  for(const b of game.bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;for(const e of game.enemies){if(!e.dead&&rectHit(b,e)){e.hp--;b.life=0;if(e.hp<=0)killEnemy(e);break}}if(game.boss&&!game.boss.dead&&rectHit(b,game.boss)){b.life=0;bossDamage(1)}}
+  game.bullets=game.bullets.filter(b=>b.life>0&&b.x>-20&&b.x<WORLD+20);
+  for(const e of game.enemies){if(e.dead)continue;e.dir=p.x<e.x?-1:1;if(e.type==='soldier'){const dist=Math.abs(p.x-e.x);e.vx=e.dir*(dist>260?55:dist<150?-25:0);e.x+=e.vx*dt}else e.vx=0;e.shoot-=dt;if(e.shoot<=0&&Math.abs(e.x-p.x)<650){e.shoot=e.type==='turret'?rnd(.8,1.4):rnd(1.2,2.1);const dx=p.x-e.x,dy=(p.y+20)-(e.y+18),len=Math.hypot(dx,dy)||1,speed=e.type==='turret'?350:300;game.enemyBullets.push({x:e.x+e.w/2,y:e.y+18,w:8,h:5,vx:dx/len*speed,vy:dy/len*speed,life:3});beep(150,.025,'square',.012)}if(rectHit(p,e))hurtPlayer();}
+  for(const b of game.enemyBullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;if(rectHit(b,p)){b.life=0;hurtPlayer()}}game.enemyBullets=game.enemyBullets.filter(b=>b.life>0);
+  for(const g of game.grenadeObjs){g.vy+=GRAV*.75*dt;g.x+=g.vx*dt;g.y+=g.vy*dt;g.t-=dt;if(g.y+g.h>FLOOR){g.y=FLOOR-g.h;g.vy*=-.55;g.vx*=.75}if(g.t<=0){g.dead=true;explode(g.x,g.y)}}game.grenadeObjs=game.grenadeObjs.filter(g=>!g.dead);
+  for(const u of game.pickups){u.bob+=dt*3;if(rectHit(p,u)){u.dead=true;if(u.type==='spread'){p.weapon='spread';game.score+=300}else p.hp=Math.min(3,p.hp+1);beep(760,.13,'sine');updateHud()}}game.pickups=game.pickups.filter(u=>!u.dead);
+  const boss=game.boss;if(boss&&!boss.dead){boss.shoot-=dt;boss.phase+=dt;if(boss.shoot<=0){boss.shoot=.65;const a=Math.atan2((p.y+20)-(boss.y+70),p.x-(boss.x+40));for(const off of [-.18,0,.18])game.enemyBullets.push({x:boss.x+30,y:boss.y+75,w:10,h:7,vx:Math.cos(a+off)*390,vy:Math.sin(a+off)*390,life:4});beep(110,.06,'sawtooth',.02)}if(rectHit(p,boss))hurtPlayer();}
+  for(const q of game.particles){q.x+=q.vx*dt;q.y+=q.vy*dt;q.vy+=520*dt;q.life-=dt}game.particles=game.particles.filter(q=>q.life>0);
+}
+function pxRect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x-game.camera),Math.round(y),Math.round(w),Math.round(h))}
+function drawPlayer(p){if(p.inv>0&&Math.floor(p.inv*12)%2===0)return;const x=p.x-game.camera,y=p.y,flip=p.dir<0? -1:1;ctx.save();ctx.translate(Math.round(x+p.w/2),Math.round(y));ctx.scale(flip,1);const crouch=p.crouch?12:0;ctx.fillStyle='#203e82';ctx.fillRect(-10,27+crouch,9,22-crouch);ctx.fillRect(3,27+crouch,9,22-crouch);ctx.fillStyle='#d6b07a';ctx.fillRect(-8,5,17,13);ctx.fillStyle='#b52c2c';ctx.fillRect(-12,2,25,6);ctx.fillStyle='#3e7d3f';ctx.fillRect(-12,18+crouch,25,14-crouch);ctx.fillStyle='#d6b07a';ctx.fillRect(9,20+crouch,17,7);ctx.fillStyle='#4c4c4c';ctx.fillRect(22,18+crouch,18,5);ctx.restore()}
+function drawEnemy(e){const x=e.x-game.camera,y=e.y;if(e.type==='turret'){ctx.fillStyle='#5f6b59';ctx.fillRect(x,y+10,38,28);ctx.fillStyle='#242c27';ctx.fillRect(x+6,y,26,13);ctx.fillRect(x-16,y+5,24,6)}else{ctx.fillStyle='#7d6b32';ctx.fillRect(x+4,y+13,20,20);ctx.fillStyle='#c59a66';ctx.fillRect(x+7,y+2,15,12);ctx.fillStyle='#171d1a';ctx.fillRect(x+3,y+33,8,11);ctx.fillRect(x+17,y+33,8,11);ctx.fillRect(e.dir<0?x-12:x+20,y+17,20,5)}}
+function draw(){ctx.save();const sx=game?.shake?rnd(-game.shake,game.shake):0,sy=game?.shake?rnd(-game.shake,game.shake):0;ctx.translate(sx,sy);ctx.clearRect(-20,-20,W+40,H+40);const cam=game?.camera||0;
+  const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#102a26');sky.addColorStop(.65,'#234333');sky.addColorStop(1,'#13251c');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#1a352f';for(let i=0;i<18;i++){const x=((i*137-cam*.15)%1150+1150)%1150-80;ctx.fillRect(x,80+(i%4)*18,90,230);ctx.fillRect(x-30,110+(i%3)*20,150,50)}
+  ctx.fillStyle='#24472e';for(let i=0;i<28;i++){const x=((i*83-cam*.35)%1100+1100)%1100-70;ctx.beginPath();ctx.moveTo(x,390);ctx.lineTo(x+55,210+(i%5)*18);ctx.lineTo(x+105,390);ctx.fill()}
+  ctx.fillStyle='#3c4c2f';ctx.fillRect(0,FLOOR,W,H-FLOOR);ctx.fillStyle='#5e6b39';ctx.fillRect(0,FLOOR,W,8);ctx.fillStyle='#28361f';for(let i=0;i<30;i++)ctx.fillRect(((i*97-cam)%1040+1040)%1040,FLOOR+20+(i%3)*16,46,8);
+  for(let x=900;x<5400;x+=620){pxRect(x,FLOOR-14,120,14,'#594d2f');pxRect(x+15,FLOOR-22,90,8,'#7c6a3b')}
+  pxRect(5850,FLOOR-180,650,180,'#303d37');pxRect(5880,FLOOR-145,590,20,'#59655f');pxRect(6000,FLOOR-260,70,80,'#303d37');
+  if(game){for(const u of game.pickups){const yy=u.y+Math.sin(u.bob)*8;ctx.fillStyle=u.type==='spread'?'#ffd23f':'#ff5d75';ctx.fillRect(u.x-cam,yy,u.w,u.h);ctx.fillStyle='#111';ctx.fillRect(u.x-cam+7,yy+7,14,14);ctx.fillStyle='#fff';ctx.font='bold 13px monospace';ctx.fillText(u.type==='spread'?'S':'+',u.x-cam+9,yy+19)}
+    for(const e of game.enemies)if(!e.dead&&e.x>cam-80&&e.x<cam+W+80)drawEnemy(e);for(const b of game.bullets){ctx.fillStyle='#fff6a5';ctx.fillRect(b.x-cam,b.y,b.w,b.h)}for(const b of game.enemyBullets){ctx.fillStyle='#ff6b4a';ctx.fillRect(b.x-cam,b.y,b.w,b.h)}for(const g of game.grenadeObjs){ctx.fillStyle='#243226';ctx.fillRect(g.x-cam,g.y,g.w,g.h);ctx.fillStyle='#9ab55f';ctx.fillRect(g.x-cam+3,g.y-3,6,4)}
+    if(game.boss&&!game.boss.dead){const b=game.boss,x=b.x-cam,y=b.y;ctx.fillStyle='#4b5047';ctx.fillRect(x,y,b.w,b.h);ctx.fillStyle='#202721';ctx.fillRect(x+18,y+26,114,70);ctx.fillStyle=game.flash>0?'#fff':'#d53a32';ctx.fillRect(x+52,y+45,46,32);ctx.fillStyle='#111';ctx.fillRect(x-38,y+66,60,18);ctx.fillStyle='#0009';ctx.fillRect(300,74,360,18);ctx.fillStyle='#d84f45';ctx.fillRect(304,78,352*(b.hp/b.maxHp),10);ctx.strokeStyle='#d5d8cb';ctx.strokeRect(300,74,360,18)}
+    drawPlayer(game.player);for(const q of game.particles){ctx.globalAlpha=clamp(q.life*2,0,1);ctx.fillStyle=q.c;ctx.fillRect(q.x-cam,q.y,q.s,q.s)}ctx.globalAlpha=1;}
+  ctx.restore();
+}
+function loop(t){const dt=Math.min(.033,(t-last)/1000||0);last=t;if(game)update(dt);draw();requestAnimationFrame(loop)}
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(k))e.preventDefault();keys.add(k);if(k==='enter'&&(!game||!game.running))reset()});addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+for(const btn of document.querySelectorAll('.touch button')){const k=btn.dataset.key;const down=e=>{e.preventDefault();keys.add(k)};const up=e=>{e.preventDefault();keys.delete(k)};btn.addEventListener('pointerdown',down);btn.addEventListener('pointerup',up);btn.addEventListener('pointercancel',up);btn.addEventListener('pointerleave',up)}
+ui.startBtn.addEventListener('click',reset);draw();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
